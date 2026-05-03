@@ -1,11 +1,3 @@
-res.setHeader('Access-Control-Allow-Origin', '*');
-res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-if (req.method === 'OPTIONS') {
-  res.status(200).end();
-  return;
-}
 // ─────────────────────────────────────────────
 // MOCK DATA
 // ─────────────────────────────────────────────
@@ -93,13 +85,6 @@ const VIOLATION_TYPES = {
   ha: ["Ta'addancin 'Yan Sanda", "Tsarewa Ba Bisa Ƙa'ida", "Rigimar Ƙasa", "Nuna Wariya", "Faɗar Albarkacin Baki", "Sauran"],
 };
 
-// ─────────────────────────────────────────────
-// SESSION STATE
-// NOTE: Vercel is stateless — sessions live only per request.
-// Africa's Talking sends the full input chain in `text` (e.g. "1*3*10002")
-// so we derive all state from `text` alone. No server-side session needed.
-// ─────────────────────────────────────────────
-
 function getLang(steps) {
   const langMap = { "1": "en", "2": "yo", "3": "ig", "4": "ha" };
   return langMap[steps[0]] || "en";
@@ -110,15 +95,45 @@ function getMenu(steps) {
 }
 
 // ─────────────────────────────────────────────
-// HANDLER
+// MAIN HANDLER
 // ─────────────────────────────────────────────
-export default function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).send("Method Not Allowed");
+export default async function handler(req, res) {
+  // ── CORS HEADERS ──
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
     return;
   }
 
-  const { text } = req.body;
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  // ── PARSE FORM DATA MANUALLY ──
+  // Vercel @vercel/node does NOT auto-parse application/x-www-form-urlencoded
+  let bodyText = '';
+  
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    // Already parsed (e.g., JSON)
+    bodyText = req.body.text || '';
+  } else if (req.body && Buffer.isBuffer(req.body)) {
+    // Raw buffer - parse it
+    bodyText = new URLSearchParams(req.body.toString()).get('text') || '';
+  } else {
+    // Fallback: read from stream if body is empty
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+    bodyText = new URLSearchParams(rawBody).get('text') || '';
+  }
+
+  const text = bodyText;
   const steps = text && text.length > 0 ? text.split("*") : [];
   const currentStep = steps.length;
   const lastInput = steps[steps.length - 1] || "";
@@ -169,7 +184,9 @@ export default function handler(req, res) {
       }
 
     } else if (menu === "2") {
-      if (lastInput.trim().length < 3) {
+      if (lastInput === "0") {
+        response = `CON ${T[lang].mainMenu}`;
+      } else if (lastInput.trim().length < 3) {
         response = `CON ${T[lang].complaintMenu}\n\nToo short. Please describe your complaint:`;
       } else {
         response = `END ${T[lang].complaintConfirm(lastInput)}`;
@@ -189,7 +206,6 @@ export default function handler(req, res) {
       }
 
     } else if (menu === "4") {
-      // Got name, ask for location
       response = `CON ${T[lang].legalLocation(lastInput)}`;
 
     } else if (menu === "5") {
@@ -207,7 +223,11 @@ export default function handler(req, res) {
     if (menu === "4") {
       const name = steps[2] || "User";
       const location = lastInput;
-      response = `END ${T[lang].legalConfirm(name, location)}`;
+      if (lastInput === "0") {
+        response = `CON ${T[lang].mainMenu}`;
+      } else {
+        response = `END ${T[lang].legalConfirm(name, location)}`;
+      }
     } else {
       response = `END ${T[lang].exit}`;
     }
@@ -217,7 +237,7 @@ export default function handler(req, res) {
     response = `END ${T[lang].exit}`;
   }
 
-  res.setHeader("Content-Type", "text/plain");
-  res.send(response);
-      }
+  res.setHeader('Content-Type', 'text/plain');
+  res.status(200).send(response);
+    }
     
