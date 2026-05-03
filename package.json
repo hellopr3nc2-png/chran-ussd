@@ -1,6 +1,7 @@
 {
   "name": "chran-ussd",
   "version": "1.0.0",
+  "type": "module"
   "description": "CHRAN USSD Service - Center for Human Rights Accountability Network",
   "main": "index.js",
   "scripts": {
